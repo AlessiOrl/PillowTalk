@@ -1,0 +1,11 @@
+services:
+  pillowtalk:
+    build: .
+    container_name: pillowtalk-bot
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
