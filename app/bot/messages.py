@@ -6,7 +6,7 @@ from random import choice as pick
 from app.models.question import QUESTION_CATEGORY_ACTION, QUESTION_CATEGORY_CLOSED, QUESTION_CATEGORY_WOULD
 
 
-APP_TAG = "☽ <b>pillowtalk</b>"
+APP_TAG = "☽ <b>Pillow Talk</b>"
 SEP = "─   ─   ─   ─   ─  "
 SEP_LIGHT = "  "
 
@@ -239,8 +239,8 @@ def action_no_assignment_message() -> str:
 
 def action_feed_entry(action_text: str, user_label: str, *, is_current_user: bool) -> str:
     if is_current_user:
-        return f"✅ <b>you</b> did:\n<i>{escape(action_text)}</i>"
-    return f"✅ <b>{escape(user_label)}</b> did:\n<i>{escape(action_text)}</i>"
+        return f"<b>you</b> did:\n<i>{escape(action_text)}</i>"
+    return f"<b>{escape(user_label)}</b> did:\n<i>{escape(action_text)}</i>"
 
 
 def no_completed_actions_message() -> str:
@@ -272,12 +272,16 @@ def read_answers_message(
     return "\n".join(lines)
 
 
+def _answer_feed_item(user_label: str, content: str) -> str:
+    return f"• <b>{escape(user_label)}</b>\n<i>{content}</i>"
+
+
 def answer_feed_entry(user_label: str, answer_text: str) -> str:
-    return f"<b>{escape(user_label)}</b> said:\n<i>{escape(answer_text)}</i>"
+    return _answer_feed_item(user_label, escape(answer_text))
 
 
 def closed_answer_feed_entry(user_label: str, answer_text: str) -> str:
-    return f"<b>{escape(user_label)}</b> chose: <b>{escape(answer_text)}</b>"
+    return f"• <b>{escape(user_label)}</b> answered: <i>{escape(answer_text)}</i>"
 
 
 def group_joined_message(group_name: str) -> str:
