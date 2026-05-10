@@ -37,7 +37,6 @@ class Question(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     times_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 

@@ -27,7 +27,7 @@ class QuestionService:
 
     async def import_questions_from_csv(self, csv_path: str) -> int:
         dataframe = pd.read_csv(csv_path)
-        required_columns = {"id", "question", "category", "mood"}
+        required_columns = {"id", "question", "category"}
         missing_columns = required_columns.difference(dataframe.columns)
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
@@ -43,13 +43,11 @@ class QuestionService:
                     id=question_id,
                     text=str(row.question).strip(),
                     category=category,
-                    mood=self._normalize_optional_value(row.mood),
                 )
                 self.session.add(question)
             else:
                 question.text = str(row.question).strip()
                 question.category = category
-                question.mood = self._normalize_optional_value(row.mood)
             imported += 1
 
         await self.session.commit()
@@ -163,13 +161,6 @@ class QuestionService:
             .limit(1)
         )
         return await self.session.scalar(fallback)
-
-    @staticmethod
-    def _normalize_optional_value(value: object) -> str | None:
-        if pd.isna(value):
-            return None
-        text = str(value).strip()
-        return text or None
 
     @staticmethod
     def _normalize_category(value: object, question_id: int) -> str:
