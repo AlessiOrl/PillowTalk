@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import date
 
-from telegram import Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -57,6 +57,7 @@ class pillowtalkBot:
             return
 
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("streak", self.streak_command))
         self.application.add_handler(CommandHandler("read", self.read_command))
         self.application.add_handler(CommandHandler("join", self.join_group_command))
@@ -68,6 +69,7 @@ class pillowtalkBot:
         self.application.add_handler(CommandHandler("next", self.force_next_command))
         self.application.add_handler(CommandHandler("reload", self.reload_command))
         self.application.add_handler(CommandHandler("questiontime", self.question_time_command))
+        self.application.add_handler(CallbackQueryHandler(self.help_admin_callback, pattern=r"^helpadmin$"))
         self.application.add_handler(CallbackQueryHandler(self.answer_feed_callback, pattern=r"^answers:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.answer_reaction_callback, pattern=r"^react:\d+:(like|neutral|dislike)$"))
         self.application.add_handler(CallbackQueryHandler(self.closed_answer_callback, pattern=r"^pick:\d+:\d+$"))
@@ -151,6 +153,31 @@ class pillowtalkBot:
 
         await self._reply_with_menu(update.message, telegram_user.id, text, delete_source=True)
 
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.message is None:
+            return
+        is_admin = await self._is_admin(update.effective_user.id)
+        reply_markup = keyboards.help_admin_keyboard() if is_admin else None
+        await self._reply_with_menu(
+            update.message,
+            update.effective_user.id,
+            messages.help_message(),
+            delete_source=True,
+            reply_markup=reply_markup,
+        )
+
+    async def help_admin_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.callback_query is None:
+            return
+        if not await self._is_admin(update.effective_user.id):
+            await update.callback_query.answer(messages.admin_only_message(), show_alert=True)
+            return
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            messages.help_admin_message(),
+            reply_markup=InlineKeyboardMarkup([]),
+        )
+
     async def streak_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.message is None:
             return
@@ -177,7 +204,7 @@ class pillowtalkBot:
     async def read_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.message is None:
             return
-        await self._send_answers_page(update.effective_user.id, update.message.reply_text, offset=0)
+        await self._send_answers_page(update.effective_user.id, update.message.reply_text)
         await self._delete_user_message(update.message)
 
     async def join_group_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -540,7 +567,7 @@ class pillowtalkBot:
                 answer_count=answer_count,
                 updated=not created,
             ),
-            reply_markup=keyboards.answer_saved_keyboard(prompt.id, answer.rating),
+            reply_markup=keyboards.answer_saved_keyboard(prompt.id),
         )
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
@@ -597,7 +624,7 @@ class pillowtalkBot:
                 answer_count=answer_count,
                 updated=not created,
             ),
-            reply_markup=keyboards.answer_saved_keyboard(prompt.id, answer.rating),
+            reply_markup=keyboards.answer_saved_keyboard(prompt.id),
         )
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
@@ -619,6 +646,8 @@ class pillowtalkBot:
         async with get_session() as session:
             user_service = UserService(session)
             action_service = ActionService(session)
+            question_service = QuestionService(session)
+            answer_service = AnswerService(session)
 
             user, _ = await user_service.register_user(
                 telegram_id=update.effective_user.id,
@@ -635,7 +664,13 @@ class pillowtalkBot:
                 await update.callback_query.answer(messages.action_already_completed_message(), show_alert=True)
                 return
 
+            prompt = await question_service.get_prompt_by_id(prompt_session_id)
+            if prompt is None:
+                await update.callback_query.answer(messages.no_prompt_message(), show_alert=True)
+                return
+
             await action_service.mark_completed(assignment_id)
+            answer, _ = await answer_service.save_answer(user, prompt, assignment.question.text)
             user = await user_service.update_streak(user, date.today())
 
         await update.callback_query.answer("✅ done!")
@@ -643,19 +678,25 @@ class pillowtalkBot:
             messages.action_completed_message(assignment.question.text, user.streak),
             reply_markup=keyboards.action_completed_keyboard(prompt_session_id),
         )
+        if update.callback_query.message is not None:
+            await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
+        if user.group_id is not None:
+            await self._refresh_group_answer_status_messages(
+                prompt_session_id,
+                user.group_id,
+                exclude_answer_id=answer.id,
+            )
 
     async def answer_feed_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.callback_query is None:
             return
 
-        _, prompt_session_id_text, offset_text = update.callback_query.data.split(":")
+        _, prompt_session_id_text, _ = update.callback_query.data.split(":")
         prompt_session_id = int(prompt_session_id_text)
-        offset = int(offset_text)
         await update.callback_query.answer()
         await self._send_answers_page(
             update.effective_user.id,
             update.callback_query.edit_message_text,
-            offset=offset,
             prompt_session_id=prompt_session_id,
         )
 
@@ -688,7 +729,7 @@ class pillowtalkBot:
         }[rating]
         await update.callback_query.answer(rating_message)
         await update.callback_query.edit_message_reply_markup(
-            reply_markup=keyboards.answer_saved_keyboard(prompt_session_id, answer.rating),
+            reply_markup=InlineKeyboardMarkup([]),
         )
 
     async def _send_answers_page(
@@ -696,7 +737,6 @@ class pillowtalkBot:
         telegram_id: int,
         responder,
         *,
-        offset: int,
         prompt_session_id: int | None = None,
     ) -> None:
         async with get_session() as session:
@@ -718,16 +758,29 @@ class pillowtalkBot:
                 await responder(messages.no_prompt_message())
                 return
 
+            user_answer = await answer_service.get_user_answer(user.id, prompt.id)
+            user_rating = user_answer.rating if user_answer is not None else None
+            feed_keyboard = keyboards.answer_feed_keyboard(
+                prompt.id,
+                rating=user_rating,
+            )
+
             if prompt.question.category == QUESTION_CATEGORY_ACTION:
                 completed_actions = await action_service.list_completed_group_actions(prompt.id, user.group_id)
-                await self._send_action_answers_page(user, prompt, completed_actions, responder, offset=offset)
+                await self._send_action_answers_page(
+                    user,
+                    prompt,
+                    completed_actions,
+                    responder,
+                    reply_markup=feed_keyboard,
+                )
                 return
 
             all_answers = await answer_service.list_group_answers_with_users(prompt.id, user.group_id)
 
         total = len(all_answers)
         if total == 0:
-            await responder(messages.no_group_answers_message())
+            await responder(messages.no_group_answers_message(), reply_markup=feed_keyboard)
             return
 
         answer_lines: list[str] = []
@@ -743,24 +796,13 @@ class pillowtalkBot:
             else:
                 answer_lines.append(messages.answer_feed_entry(user_label, answer.text))
 
-        distribution_rows = None
-        if prompt.question.category in BUTTON_QUESTION_CATEGORIES:
-            distribution: dict[str, int] = {}
-            for answer in all_answers:
-                distribution[answer.text] = distribution.get(answer.text, 0) + 1
-            distribution_rows = sorted(distribution.items(), key=lambda item: (-item[1], item[0]))
-            distribution_rows = [
-                (label, count, total)
-                for label, count in distribution_rows
-            ]
-
         await responder(
             messages.read_answers_message(
                 prompt.question.text,
                 prompt.question.category,
                 answer_lines,
-                distribution_rows=distribution_rows,
             ),
+            reply_markup=feed_keyboard,
         )
 
     async def _build_prompt_delivery(self, prompt_session, telegram_id: int) -> tuple[str, object | None]:
@@ -826,10 +868,18 @@ class pillowtalkBot:
         text = messages.action_prompt_message(assignment.question.text)
         return text, keyboards.action_done_keyboard(prompt_session.id, assignment.id)
 
-    async def _send_action_answers_page(self, user, prompt, completed_actions, responder, *, offset: int) -> None:
+    async def _send_action_answers_page(
+        self,
+        user,
+        prompt,
+        completed_actions,
+        responder,
+        *,
+        reply_markup,
+    ) -> None:
         total = len(completed_actions)
         if total == 0:
-            await responder(messages.no_completed_actions_message())
+            await responder(messages.no_completed_actions_message(), reply_markup=reply_markup)
             return
 
         answer_lines: list[str] = []
@@ -848,6 +898,7 @@ class pillowtalkBot:
                 prompt.question.category,
                 answer_lines,
             ),
+            reply_markup=reply_markup,
         )
 
     async def _is_admin(self, telegram_id: int) -> bool:
@@ -999,8 +1050,8 @@ class pillowtalkBot:
             delete_source=True,
         )
 
-    async def _reply_with_menu(self, message, telegram_id: int, text: str, *, delete_source: bool = False):
-        response = await message.reply_text(text)
+    async def _reply_with_menu(self, message, telegram_id: int, text: str, *, delete_source: bool = False, reply_markup=None):
+        response = await message.reply_text(text, reply_markup=reply_markup)
         if delete_source:
             await self._delete_user_message(message)
         return response
@@ -1043,7 +1094,7 @@ class pillowtalkBot:
             await self.application.bot.edit_message_reply_markup(
                 chat_id=telegram_id,
                 message_id=user.last_prompt_message_id,
-                reply_markup=keyboards.answer_saved_keyboard(prompt_session_id, answer.rating if answer is not None else None),
+                reply_markup=keyboards.answer_saved_keyboard(prompt_session_id),
             )
         except TelegramError as exc:
             logger.debug("Failed to add read-answers button to prompt for %s: %s", telegram_id, exc)
@@ -1091,6 +1142,8 @@ class pillowtalkBot:
                     answer_count=answer_count,
                     updated=answer.updated_at > answer.created_at,
                 )
+            elif prompt.question.category == QUESTION_CATEGORY_ACTION:
+                message_text = messages.action_completed_message(answer.text, answer.user.streak)
             else:
                 message_text = messages.answer_saved_message(
                     streak=answer.user.streak,
@@ -1099,12 +1152,18 @@ class pillowtalkBot:
                     has_group=True,
                 )
 
+            reply_markup = (
+                keyboards.action_completed_keyboard(prompt_session_id)
+                if prompt.question.category == QUESTION_CATEGORY_ACTION
+                else keyboards.answer_saved_keyboard(prompt_session_id)
+            )
+
             try:
                 await self.application.bot.edit_message_text(
                     chat_id=answer.user.telegram_id,
                     message_id=answer.status_message_id,
                     text=message_text,
-                    reply_markup=keyboards.answer_saved_keyboard(prompt_session_id, answer.rating),
+                    reply_markup=reply_markup,
                 )
             except TelegramError as exc:
                 logger.debug("Failed to refresh answer status message for %s: %s", answer.user.telegram_id, exc)

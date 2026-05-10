@@ -31,8 +31,10 @@ def closed_question_keyboard(prompt_session_id: int, members: list[tuple[int, st
     if row:
         rows.append(row)
     return InlineKeyboardMarkup(rows)
-def answer_saved_keyboard(prompt_session_id: int, rating: str | None = None) -> InlineKeyboardMarkup:
-    reaction_buttons = [
+
+
+def _answer_reaction_buttons(prompt_session_id: int, rating: str | None = None) -> list[InlineKeyboardButton]:
+    return [
         InlineKeyboardButton(
             "👍 like" if rating != "like" else "✅ like",
             callback_data=f"react:{prompt_session_id}:like",
@@ -46,26 +48,24 @@ def answer_saved_keyboard(prompt_session_id: int, rating: str | None = None) -> 
             callback_data=f"react:{prompt_session_id}:dislike",
         ),
     ]
+
+
+def answer_saved_keyboard(prompt_session_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("💬 read answers", callback_data=f"answers:{prompt_session_id}:0")],
-            reaction_buttons,
         ]
     )
 
 
-def answer_pagination_keyboard(prompt_session_id: int, offset: int, page_size: int, total: int) -> InlineKeyboardMarkup:
-    buttons: list[InlineKeyboardButton] = []
-    if offset > 0:
-        previous_offset = max(offset - page_size, 0)
-        buttons.append(InlineKeyboardButton("← prev", callback_data=f"answers:{prompt_session_id}:{previous_offset}"))
-    if offset + page_size < total:
-        next_offset = offset + page_size
-        buttons.append(InlineKeyboardButton("next →", callback_data=f"answers:{prompt_session_id}:{next_offset}"))
-
-    if not buttons:
-        return InlineKeyboardMarkup([])
-    return InlineKeyboardMarkup([buttons])
+def answer_feed_keyboard(
+    prompt_session_id: int,
+    *,
+    rating: str | None = None,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    rows.append(_answer_reaction_buttons(prompt_session_id, rating))
+    return InlineKeyboardMarkup(rows)
 
 
 def action_done_keyboard(prompt_session_id: int, assignment_id: int) -> InlineKeyboardMarkup:
@@ -76,5 +76,13 @@ def action_done_keyboard(prompt_session_id: int, assignment_id: int) -> InlineKe
 
 def action_completed_keyboard(prompt_session_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💬 see who did what", callback_data=f"answers:{prompt_session_id}:0")]]
+        [
+            [InlineKeyboardButton("💬 read answers", callback_data=f"answers:{prompt_session_id}:0")],
+        ]
+    )
+
+
+def help_admin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔧 admin commands", callback_data="helpadmin")]]
     )
