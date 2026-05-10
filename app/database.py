@@ -35,6 +35,7 @@ async def create_tables() -> None:
         await connection.run_sync(Base.metadata.create_all)
         await connection.run_sync(_ensure_answer_status_message_id_column)
         await connection.run_sync(_ensure_user_prompt_tracking_columns)
+        await connection.run_sync(_ensure_user_nickname_column)
 
 
 def _ensure_answer_status_message_id_column(connection) -> None:
@@ -54,3 +55,11 @@ def _ensure_user_prompt_tracking_columns(connection) -> None:
         connection.execute(text("ALTER TABLE users ADD COLUMN last_prompt_session_id INTEGER"))
     if "last_prompt_message_id" not in columns:
         connection.execute(text("ALTER TABLE users ADD COLUMN last_prompt_message_id INTEGER"))
+
+
+def _ensure_user_nickname_column(connection) -> None:
+    inspector = inspect(connection)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+
+    if "nickname" not in columns:
+        connection.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(32)"))

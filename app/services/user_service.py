@@ -82,6 +82,12 @@ class UserService:
         await self.session.refresh(user)
         return user
 
+    async def set_nickname(self, user: User, nickname: str | None) -> User:
+        user.nickname = nickname
+        await self.session.commit()
+        await self.session.refresh(user)
+        return user
+
     async def set_last_prompt_message(self, user: User, prompt_session_id: int, message_id: int) -> User:
         user.last_prompt_session_id = prompt_session_id
         user.last_prompt_message_id = message_id

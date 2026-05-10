@@ -51,6 +51,7 @@ class pillowtalkBot:
         self.application.add_handler(CommandHandler("leavegroup", self.leave_group_command))
         self.application.add_handler(CommandHandler("creategroup", self.create_group_command))
         self.application.add_handler(CommandHandler("addmember", self.add_member_command))
+        self.application.add_handler(CommandHandler("nickname", self.nickname_command))
         self.application.add_handler(CommandHandler("forcenext", self.force_next_command))
         self.application.add_handler(CallbackQueryHandler(self.answer_feed_callback, pattern=r"^answers:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.closed_answer_callback, pattern=r"^pick:\d+:\d+$"))
@@ -123,7 +124,7 @@ class pillowtalkBot:
             text = messages.returning_user_message()
 
         if prompt is not None:
-            text = f"{text}\n\nlatest question is already live.\njust reply with your answer."
+            text = f"{text}\n\ntonight's question is already live 🌙\njust reply with your answer."
 
         await self._reply_with_menu(update.message, telegram_user.id, text, delete_source=True)
 
@@ -262,6 +263,47 @@ class pillowtalkBot:
 
         await self._add_member(update, context.args[0], context.args[1])
 
+    async def nickname_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.message is None:
+            return
+
+        if not context.args:
+            await self._reply_with_menu(
+                update.message,
+                update.effective_user.id,
+                messages.nickname_prompt_message(),
+                delete_source=True,
+            )
+            return
+
+        nickname = " ".join(context.args).strip()
+        if len(nickname) > 32:
+            await self._reply_with_menu(
+                update.message,
+                update.effective_user.id,
+                messages.nickname_too_long_message(),
+                delete_source=True,
+            )
+            return
+
+        async with get_session() as session:
+            user_service = UserService(session)
+            user = await user_service.get_by_telegram_id(update.effective_user.id)
+            if user is None:
+                user, _ = await user_service.register_user(
+                    telegram_id=update.effective_user.id,
+                    username=update.effective_user.username,
+                    display_name=update.effective_user.full_name,
+                )
+            await user_service.set_nickname(user, nickname)
+
+        await self._reply_with_menu(
+            update.message,
+            update.effective_user.id,
+            messages.nickname_set_message(nickname),
+            delete_source=True,
+        )
+
     async def force_next_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.message is None:
             return
@@ -377,10 +419,11 @@ class pillowtalkBot:
             member_map = {member.id: member for member in members}
             picked_user = member_map.get(picked_user_id)
             if picked_user is None:
-                await update.callback_query.answer("that pick expired.", show_alert=True)
+                await update.callback_query.answer("that pick expired 💨", show_alert=True)
                 return
 
             chosen_name = messages.closed_question_member_label(
+                picked_user.nickname,
                 picked_user.display_name,
                 picked_user.username,
                 picked_user.telegram_id,
@@ -389,7 +432,7 @@ class pillowtalkBot:
             user = await user_service.update_streak(user, date.today())
             answer_count = await answer_service.count_group_answers(prompt.id, user.group_id)
 
-        await update.callback_query.answer("saved")
+        await update.callback_query.answer("✓ saved")
         await update.callback_query.edit_message_text(
             messages.closed_answer_saved_message(
                 chosen_name=chosen_name,
@@ -530,7 +573,7 @@ class pillowtalkBot:
         member_buttons = [
             (
                 member.id,
-                messages.closed_question_member_label(member.display_name, member.username, member.telegram_id),
+                messages.closed_question_member_label(member.nickname, member.display_name, member.username, member.telegram_id),
             )
             for member in members
         ]
@@ -647,7 +690,7 @@ class pillowtalkBot:
                 await self._reply_with_menu(
                     update.message,
                     update.effective_user.id,
-                    "that user hasn’t started the bot yet.",
+                    "that user hasn't started the bot yet 💨",
                     delete_source=True,
                 )
                 return

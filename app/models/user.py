@@ -14,6 +14,7 @@ class User(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    nickname: Mapped[str | None] = mapped_column(String(32), nullable=True)
     streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_answer_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
