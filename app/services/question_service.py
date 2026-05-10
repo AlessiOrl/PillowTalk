@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
+from app.models.answer import Answer
 from app.models.prompt_session import PromptSession
 from app.models.question import QUESTION_CATEGORIES, Question
 
@@ -121,12 +122,32 @@ class QuestionService:
         result = await self.session.scalar(statement)
         return int(result or 0)
 
+    async def count_remaining_questions(self) -> int:
+        """Return how many questions have never been asked yet."""
+        already_asked = select(PromptSession.question_id).distinct()
+        statement = select(func.count(Question.id)).where(Question.id.not_in(already_asked))
+        result = await self.session.scalar(statement)
+        return int(result or 0)
+
+    async def list_asked_questions(self) -> list[PromptSession]:
+        """Return every prompt session with its question and answers (including the answering user)."""
+        statement = (
+            select(PromptSession)
+            .options(
+                selectinload(PromptSession.question),
+                selectinload(PromptSession.answers).selectinload(Answer.user),
+            )
+            .order_by(PromptSession.created_at.desc())
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
     async def _pick_next_question(self) -> Question | None:
-        cutoff = datetime.utcnow() - timedelta(days=self.settings.question_cooldown_days)
-        recent_questions = select(PromptSession.question_id).where(PromptSession.created_at >= cutoff)
+        # Exclude every question that has already been asked (tracked via PromptSession).
+        already_asked = select(PromptSession.question_id).distinct()
         statement = (
             select(Question)
-            .where(Question.id.not_in(recent_questions))
+            .where(Question.id.not_in(already_asked))
             .order_by(func.random())
             .limit(1)
         )
@@ -134,7 +155,13 @@ class QuestionService:
         if question is not None:
             return question
 
-        fallback = select(Question).order_by(func.random()).limit(1)
+        # All questions have been asked at least once – start a new cycle
+        # by picking the one that was used the longest time ago.
+        fallback = (
+            select(Question)
+            .order_by(Question.last_used_at.asc())
+            .limit(1)
+        )
         return await self.session.scalar(fallback)
 
     @staticmethod

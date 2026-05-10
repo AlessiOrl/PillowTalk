@@ -36,6 +36,7 @@ async def create_tables() -> None:
         await connection.run_sync(_ensure_answer_status_message_id_column)
         await connection.run_sync(_ensure_user_prompt_tracking_columns)
         await connection.run_sync(_ensure_user_nickname_column)
+        await connection.run_sync(_ensure_action_assignments_table)
 
 
 def _ensure_answer_status_message_id_column(connection) -> None:
@@ -63,3 +64,11 @@ def _ensure_user_nickname_column(connection) -> None:
 
     if "nickname" not in columns:
         connection.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(32)"))
+
+
+def _ensure_action_assignments_table(connection) -> None:
+    inspector = inspect(connection)
+    if "action_assignments" in inspector.get_table_names():
+        return
+    from app.models.action_assignment import ActionAssignment
+    ActionAssignment.__table__.create(connection)

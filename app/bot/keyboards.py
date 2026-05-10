@@ -37,3 +37,15 @@ def answer_pagination_keyboard(prompt_session_id: int, offset: int, page_size: i
     if not buttons:
         return InlineKeyboardMarkup([])
     return InlineKeyboardMarkup([buttons])
+
+
+def action_done_keyboard(prompt_session_id: int, assignment_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✅ done", callback_data=f"actiondone:{prompt_session_id}:{assignment_id}")]]
+    )
+
+
+def action_completed_keyboard(prompt_session_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("💬 see who did what", callback_data=f"answers:{prompt_session_id}:0")]]
+    )

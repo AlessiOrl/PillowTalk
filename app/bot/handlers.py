@@ -21,6 +21,7 @@ from app.bot import keyboards, messages
 from app.config import get_settings
 from app.database import get_session
 from app.models.question import QUESTION_CATEGORY_ACTION, QUESTION_CATEGORY_CLOSED
+from app.services.action_service import ActionService
 from app.services.answer_service import AnswerService
 from app.services.group_service import GroupService
 from app.services.question_service import PromptDispatch, QuestionService
@@ -52,9 +53,11 @@ class pillowtalkBot:
         self.application.add_handler(CommandHandler("creategroup", self.create_group_command))
         self.application.add_handler(CommandHandler("addmember", self.add_member_command))
         self.application.add_handler(CommandHandler("nickname", self.nickname_command))
-        self.application.add_handler(CommandHandler("forcenext", self.force_next_command))
+        self.application.add_handler(CommandHandler("next", self.force_next_command))
+        self.application.add_handler(CommandHandler("reload", self.reload_command))
         self.application.add_handler(CallbackQueryHandler(self.answer_feed_callback, pattern=r"^answers:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.closed_answer_callback, pattern=r"^pick:\d+:\d+$"))
+        self.application.add_handler(CallbackQueryHandler(self.action_done_callback, pattern=r"^actiondone:\d+:\d+$"))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_message))
 
     async def start(self) -> None:
@@ -90,9 +93,14 @@ class pillowtalkBot:
         if self.application is None:
             return
 
+        is_action = prompt_session.question.category == QUESTION_CATEGORY_ACTION
+
         for user in users:
             try:
-                text, reply_markup = await self._build_prompt_delivery(prompt_session, user.telegram_id)
+                if is_action:
+                    text, reply_markup = await self._build_action_delivery(prompt_session, user)
+                else:
+                    text, reply_markup = await self._build_prompt_delivery(prompt_session, user.telegram_id)
                 await self.application.bot.send_chat_action(chat_id=user.telegram_id, action=ChatAction.TYPING)
                 prompt_message = await self.application.bot.send_message(
                     chat_id=user.telegram_id,
@@ -324,6 +332,31 @@ class pillowtalkBot:
             delete_source=True,
         )
 
+    async def reload_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.message is None:
+            return
+
+        if not await self._is_admin(update.effective_user.id):
+            await self._reply_with_menu(update.message, update.effective_user.id, messages.admin_only_message(), delete_source=True)
+            return
+
+        from pathlib import Path
+
+        csv_path = Path(self.settings.resolved_questions_csv_path)
+        if not csv_path.exists():
+            await self._reply_with_menu(update.message, update.effective_user.id, "❌ questions CSV not found.", delete_source=True)
+            return
+
+        async with get_session() as session:
+            count = await QuestionService(session).import_questions_from_csv(str(csv_path))
+
+        await self._reply_with_menu(
+            update.message,
+            update.effective_user.id,
+            f"✓ reloaded <b>{count}</b> questions from CSV.",
+            delete_source=True,
+        )
+
     async def text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.message is None or not update.message.text:
             return
@@ -358,7 +391,7 @@ class pillowtalkBot:
                 await self._reply_with_menu(
                     update.message,
                     update.effective_user.id,
-                    messages.action_not_implemented_message(),
+                    messages.action_no_assignment_message(),
                     delete_source=True,
                 )
                 return
@@ -451,6 +484,42 @@ class pillowtalkBot:
                 exclude_answer_id=answer.id,
             )
 
+    async def action_done_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.callback_query is None:
+            return
+
+        _, prompt_session_id_text, assignment_id_text = update.callback_query.data.split(":")
+        prompt_session_id = int(prompt_session_id_text)
+        assignment_id = int(assignment_id_text)
+
+        async with get_session() as session:
+            user_service = UserService(session)
+            action_service = ActionService(session)
+
+            user, _ = await user_service.register_user(
+                telegram_id=update.effective_user.id,
+                username=update.effective_user.username,
+                display_name=update.effective_user.full_name,
+            )
+
+            assignment = await action_service.get_user_assignment(user.id, prompt_session_id)
+            if assignment is None or assignment.id != assignment_id:
+                await update.callback_query.answer(messages.action_no_assignment_message(), show_alert=True)
+                return
+
+            if assignment.completed:
+                await update.callback_query.answer(messages.action_already_completed_message(), show_alert=True)
+                return
+
+            await action_service.mark_completed(assignment_id)
+            user = await user_service.update_streak(user, date.today())
+
+        await update.callback_query.answer("✅ done!")
+        await update.callback_query.edit_message_text(
+            messages.action_completed_message(assignment.question.text, user.streak),
+            reply_markup=keyboards.action_completed_keyboard(prompt_session_id),
+        )
+
     async def answer_feed_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.callback_query is None:
             return
@@ -478,6 +547,7 @@ class pillowtalkBot:
             user_service = UserService(session)
             question_service = QuestionService(session)
             answer_service = AnswerService(session)
+            action_service = ActionService(session)
             user = await user_service.get_by_telegram_id(telegram_id)
             if user is None or user.group_id is None:
                 await responder(messages.group_required_message())
@@ -490,6 +560,11 @@ class pillowtalkBot:
             )
             if prompt is None:
                 await responder(messages.no_prompt_message())
+                return
+
+            if prompt.question.category == QUESTION_CATEGORY_ACTION:
+                completed_actions = await action_service.list_completed_group_actions(prompt.id, user.group_id)
+                await self._send_action_answers_page(user, prompt, completed_actions, responder, offset=offset)
                 return
 
             all_answers = await answer_service.list_group_answers_with_users(prompt.id, user.group_id)
@@ -579,6 +654,70 @@ class pillowtalkBot:
         ]
         text = messages.daily_question_message(prompt_session.question.text, category)
         return text, keyboards.closed_question_keyboard(prompt_session.id, member_buttons)
+
+    async def _build_action_delivery(self, prompt_session, user) -> tuple[str, object | None]:
+        async with get_session() as session:
+            action_service = ActionService(session)
+            db_user = await UserService(session).get_by_telegram_id(user.telegram_id)
+            if db_user is None:
+                text = messages.daily_question_message(prompt_session.question.text, QUESTION_CATEGORY_ACTION)
+                return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
+
+            assignment = await action_service.assign_action_to_user(db_user, prompt_session)
+            if assignment is None:
+                text = messages.daily_question_message(prompt_session.question.text, QUESTION_CATEGORY_ACTION)
+                return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
+
+            # Reload to get question relationship
+            assignment = await action_service.get_user_assignment(db_user.id, prompt_session.id)
+            if assignment is None:
+                text = messages.daily_question_message(prompt_session.question.text, QUESTION_CATEGORY_ACTION)
+                return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
+
+        text = messages.action_prompt_message(assignment.question.text)
+        return text, keyboards.action_done_keyboard(prompt_session.id, assignment.id)
+
+    async def _send_action_answers_page(self, user, prompt, completed_actions, responder, *, offset: int) -> None:
+        total = len(completed_actions)
+        if total == 0:
+            await responder(messages.no_completed_actions_message())
+            return
+
+        page_actions = completed_actions[offset : offset + self.settings.answer_feed_page_size]
+        if not page_actions:
+            page_actions = completed_actions[: self.settings.answer_feed_page_size]
+            offset = 0
+
+        answer_lines: list[str] = []
+        for action in page_actions:
+            is_current_user = action.user is not None and action.user.id == user.id
+            user_label = messages.closed_question_member_label(
+                action.user.nickname if action.user else None,
+                action.user.display_name if action.user else None,
+                action.user.username if action.user else None,
+                action.user.telegram_id if action.user else 0,
+            )
+            answer_lines.append(messages.action_feed_entry(action.question.text, user_label, is_current_user=is_current_user))
+
+        page_start = offset + 1
+        page_end = offset + len(page_actions)
+        keyboard = keyboards.answer_pagination_keyboard(
+            prompt.id,
+            offset=offset,
+            page_size=self.settings.answer_feed_page_size,
+            total=total,
+        )
+        await responder(
+            messages.read_answers_message(
+                prompt.question.text,
+                prompt.question.category,
+                answer_lines,
+                page_start=page_start,
+                page_end=page_end,
+                total=total,
+            ),
+            reply_markup=keyboard,
+        )
 
     async def _is_admin(self, telegram_id: int) -> bool:
         return self.settings.admin_telegram_id is not None and telegram_id == self.settings.admin_telegram_id

@@ -57,6 +57,12 @@ async def admin_stats() -> dict[str, Any]:
     }
 
 
+@router.post("/reload-questions", dependencies=[Depends(require_admin_token)])
+async def reload_questions(request: Request) -> dict[str, Any]:
+    count = await request.app.state.reimport_questions()
+    return {"imported": count}
+
+
 @router.post("/force-question", dependencies=[Depends(require_admin_token)])
 async def force_question(request: Request) -> dict[str, Any]:
     dispatch = await request.app.state.bot_service.dispatch_next_prompt(force_new=True, source="api")
@@ -90,3 +96,38 @@ async def create_group(payload: GroupCreateRequest) -> dict[str, Any]:
         group = await GroupService(session).create_group(payload.name, settings.admin_telegram_id)
 
     return {"id": group.id, "name": group.name, "invite_code": group.invite_code}
+
+
+@router.get("/question-history", dependencies=[Depends(require_admin_token)])
+async def question_history() -> dict[str, Any]:
+    async with get_session() as session:
+        question_service = QuestionService(session)
+        total = await question_service.count_questions()
+        remaining = await question_service.count_remaining_questions()
+        prompts = await question_service.list_asked_questions()
+
+    history = []
+    for prompt in prompts:
+        answered_by = [
+            {
+                "user_id": answer.user_id,
+                "display_name": answer.user.display_name if answer.user else None,
+                "nickname": answer.user.nickname if answer.user else None,
+                "answered_at": answer.created_at.isoformat(),
+            }
+            for answer in prompt.answers
+        ]
+        history.append({
+            "prompt_session_id": prompt.id,
+            "question_id": prompt.question_id,
+            "question": prompt.question.text,
+            "asked_on": prompt.asked_on.isoformat(),
+            "source": prompt.source,
+            "answered_by": answered_by,
+        })
+
+    return {
+        "total_questions": total,
+        "remaining_unasked": remaining,
+        "asked": history,
+    }

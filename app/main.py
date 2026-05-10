@@ -40,14 +40,27 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("Questions CSV not found at %s", csv_path)
 
+    async def _reimport_questions() -> int:
+        csv_path = Path(settings.resolved_questions_csv_path)
+        if not csv_path.exists():
+            logger.warning("Questions CSV not found at %s", csv_path)
+            return 0
+        async with get_session() as sess:
+            count = await QuestionService(sess).import_questions_from_csv(str(csv_path))
+        logger.info("Re-imported %s questions from %s", count, csv_path)
+        return count
+
     bot_service = pillowtalkBot()
 
     async def scheduled_dispatch() -> None:
+        await _reimport_questions()
         await bot_service.dispatch_next_prompt(force_new=False, source="scheduled")
 
     scheduler = DailyQuestionScheduler(scheduled_dispatch)
     app.state.bot_service = bot_service
     app.state.scheduler = scheduler
+
+    app.state.reimport_questions = _reimport_questions
 
     await bot_service.start()
     scheduler.start()

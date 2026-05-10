@@ -75,7 +75,7 @@ def daily_question_message(question_text: str, category: str | None) -> str:
     if category == QUESTION_CATEGORY_CLOSED:
         footer = "tap the name that fits most 👇"
     elif category == QUESTION_CATEGORY_ACTION:
-        footer = "action mode isn't live yet — hang tight 🛸"
+        footer = "check your DM — you got a personal action 🎯"
     else:
         footer = "reply with whatever comes to mind.\nbe honest. 🤫"
 
@@ -172,6 +172,45 @@ def action_not_implemented_message() -> str:
     return "action mode isn't live yet 🛸\njust a teaser for now."
 
 
+def action_prompt_message(action_text: str) -> str:
+    return (
+        f"tonight's action 🎯\n"
+        f"\n"
+        f"<b>{escape(action_text)}</b>\n\n"
+        f"\n"
+        "do it and tap ✅ when you're done."
+    )
+
+
+def action_completed_message(action_text: str, streak: int) -> str:
+    return (
+        f"done ✅\n\n"
+        f"<i>{escape(action_text)}</i>\n\n"
+        f"{_streak_display(streak)}"
+    )
+
+
+def action_already_completed_message() -> str:
+    return "you already completed this one ✅"
+
+
+def action_no_assignment_message() -> str:
+    return "no action assigned yet 🌙\nwait for the next question drop."
+
+
+def action_feed_entry(action_text: str, user_label: str, *, is_current_user: bool) -> str:
+    if is_current_user:
+        return f"🫵 <b>you</b> did:\n<i>{escape(action_text)}</i>"
+    return f"✅ <b>{escape(user_label)}</b> did:\n<i>{escape(action_text)}</i>"
+
+
+def no_completed_actions_message() -> str:
+    return (
+        "no one completed their action yet 🤫\n\n"
+        "be the first — tap ✅ when you're done."
+    )
+
+
 def anonymous_answer_message(answer_text: str, page: int, total: int) -> str:
     return (
         f"💬 someone in your group said…\n\n"
@@ -194,10 +233,8 @@ def read_answers_message(
 ) -> str:
     lines = [
         "tonight's answers 🌙",
-        SEP,
         "",
         f"<b>{escape(question_text)}</b>",
-        "",
     ]
 
     if category == QUESTION_CATEGORY_CLOSED and distribution_rows:
@@ -208,7 +245,7 @@ def read_answers_message(
             lines.append(f"  {distribution_bar(count, total_answers)}  <b>{pct}%</b>  ({count})")
             lines.append("")
     else:
-        lines.extend(["", SEP_LIGHT, ""])
+        lines.extend([""])
         lines.extend(answer_lines)
 
     return "\n".join(lines)
