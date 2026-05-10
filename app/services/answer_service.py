@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.answer import Answer
+from app.models.answer import ANSWER_RATINGS, Answer
 from app.models.prompt_session import PromptSession
 from app.models.user import User
 
@@ -48,6 +48,22 @@ class AnswerService:
         )
         result = await self.session.scalar(statement)
         return int(result or 0)
+
+    async def get_user_answer(self, user_id: int, prompt_session_id: int) -> Answer | None:
+        statement = select(Answer).where(
+            Answer.user_id == user_id,
+            Answer.prompt_session_id == prompt_session_id,
+        )
+        return await self.session.scalar(statement)
+
+    async def set_answer_rating(self, answer: Answer, rating: str) -> Answer:
+        if rating not in ANSWER_RATINGS:
+            raise ValueError(f"Unsupported rating: {rating}")
+
+        answer.rating = rating
+        await self.session.commit()
+        await self.session.refresh(answer)
+        return answer
 
     async def get_group_answers(
         self,

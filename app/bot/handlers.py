@@ -20,6 +20,7 @@ from telegram.ext import (
 from app.bot import keyboards, messages
 from app.config import get_settings
 from app.database import get_session
+from app.models.answer import ANSWER_RATING_DISLIKE, ANSWER_RATING_LIKE, ANSWER_RATING_NEUTRAL
 from app.models.question import (
     BUTTON_QUESTION_CATEGORIES,
     CHOICE_QUESTION_OPTIONS,
@@ -68,6 +69,7 @@ class pillowtalkBot:
         self.application.add_handler(CommandHandler("reload", self.reload_command))
         self.application.add_handler(CommandHandler("questiontime", self.question_time_command))
         self.application.add_handler(CallbackQueryHandler(self.answer_feed_callback, pattern=r"^answers:\d+:\d+$"))
+        self.application.add_handler(CallbackQueryHandler(self.answer_reaction_callback, pattern=r"^react:\d+:(like|neutral|dislike)$"))
         self.application.add_handler(CallbackQueryHandler(self.closed_answer_callback, pattern=r"^pick:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.choice_answer_callback, pattern=r"^choice:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.action_done_callback, pattern=r"^actiondone:\d+:\d+$"))
@@ -538,7 +540,7 @@ class pillowtalkBot:
                 answer_count=answer_count,
                 updated=not created,
             ),
-            reply_markup=keyboards.answer_saved_keyboard(prompt.id),
+            reply_markup=keyboards.answer_saved_keyboard(prompt.id, answer.rating),
         )
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
@@ -595,7 +597,7 @@ class pillowtalkBot:
                 answer_count=answer_count,
                 updated=not created,
             ),
-            reply_markup=keyboards.answer_saved_keyboard(prompt.id),
+            reply_markup=keyboards.answer_saved_keyboard(prompt.id, answer.rating),
         )
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
@@ -655,6 +657,38 @@ class pillowtalkBot:
             update.callback_query.edit_message_text,
             offset=offset,
             prompt_session_id=prompt_session_id,
+        )
+
+    async def answer_reaction_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.callback_query is None:
+            return
+
+        _, prompt_session_id_text, rating = update.callback_query.data.split(":")
+        prompt_session_id = int(prompt_session_id_text)
+
+        async with get_session() as session:
+            user_service = UserService(session)
+            answer_service = AnswerService(session)
+            user = await user_service.get_by_telegram_id(update.effective_user.id)
+            if user is None:
+                await update.callback_query.answer(messages.no_prompt_message(), show_alert=True)
+                return
+
+            answer = await answer_service.get_user_answer(user.id, prompt_session_id)
+            if answer is None:
+                await update.callback_query.answer("answer first, then react ✍️", show_alert=True)
+                return
+
+            answer = await answer_service.set_answer_rating(answer, rating)
+
+        rating_message = {
+            ANSWER_RATING_LIKE: "saved: like",
+            ANSWER_RATING_NEUTRAL: "saved: neutral",
+            ANSWER_RATING_DISLIKE: "saved: dislike",
+        }[rating]
+        await update.callback_query.answer(rating_message)
+        await update.callback_query.edit_message_reply_markup(
+            reply_markup=keyboards.answer_saved_keyboard(prompt_session_id, answer.rating),
         )
 
     async def _send_answers_page(
@@ -996,17 +1030,20 @@ class pillowtalkBot:
             return
 
         async with get_session() as session:
-            user = await UserService(session).get_by_telegram_id(telegram_id)
+            user_service = UserService(session)
+            answer_service = AnswerService(session)
+            user = await user_service.get_by_telegram_id(telegram_id)
             if user is None:
                 return
             if user.last_prompt_session_id != prompt_session_id or user.last_prompt_message_id is None:
                 return
+            answer = await answer_service.get_user_answer(user.id, prompt_session_id)
 
         try:
             await self.application.bot.edit_message_reply_markup(
                 chat_id=telegram_id,
                 message_id=user.last_prompt_message_id,
-                reply_markup=keyboards.answer_saved_keyboard(prompt_session_id),
+                reply_markup=keyboards.answer_saved_keyboard(prompt_session_id, answer.rating if answer is not None else None),
             )
         except TelegramError as exc:
             logger.debug("Failed to add read-answers button to prompt for %s: %s", telegram_id, exc)
@@ -1067,7 +1104,7 @@ class pillowtalkBot:
                     chat_id=answer.user.telegram_id,
                     message_id=answer.status_message_id,
                     text=message_text,
-                    reply_markup=keyboards.answer_saved_keyboard(prompt_session_id),
+                    reply_markup=keyboards.answer_saved_keyboard(prompt_session_id, answer.rating),
                 )
             except TelegramError as exc:
                 logger.debug("Failed to refresh answer status message for %s: %s", answer.user.telegram_id, exc)

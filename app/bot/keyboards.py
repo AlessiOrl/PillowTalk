@@ -31,11 +31,26 @@ def closed_question_keyboard(prompt_session_id: int, members: list[tuple[int, st
     if row:
         rows.append(row)
     return InlineKeyboardMarkup(rows)
-
-
-def answer_saved_keyboard(prompt_session_id: int) -> InlineKeyboardMarkup:
+def answer_saved_keyboard(prompt_session_id: int, rating: str | None = None) -> InlineKeyboardMarkup:
+    reaction_buttons = [
+        InlineKeyboardButton(
+            "👍 like" if rating != "like" else "✅ like",
+            callback_data=f"react:{prompt_session_id}:like",
+        ),
+        InlineKeyboardButton(
+            "😐 neutral" if rating != "neutral" else "✅ neutral",
+            callback_data=f"react:{prompt_session_id}:neutral",
+        ),
+        InlineKeyboardButton(
+            "👎 dislike" if rating != "dislike" else "✅ dislike",
+            callback_data=f"react:{prompt_session_id}:dislike",
+        ),
+    ]
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💬 read answers", callback_data=f"answers:{prompt_session_id}:0")]]
+        [
+            [InlineKeyboardButton("💬 read answers", callback_data=f"answers:{prompt_session_id}:0")],
+            reaction_buttons,
+        ]
     )
 
 

@@ -34,6 +34,7 @@ async def create_tables() -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await connection.run_sync(_ensure_answer_status_message_id_column)
+        await connection.run_sync(_ensure_answer_rating_column)
         await connection.run_sync(_ensure_user_prompt_tracking_columns)
         await connection.run_sync(_ensure_user_nickname_column)
         await connection.run_sync(_ensure_action_assignments_table)
@@ -46,6 +47,16 @@ def _ensure_answer_status_message_id_column(connection) -> None:
         return
 
     connection.execute(text("ALTER TABLE answers ADD COLUMN status_message_id INTEGER"))
+
+
+def _ensure_answer_rating_column(connection) -> None:
+    inspector = inspect(connection)
+    columns = {column["name"] for column in inspector.get_columns("answers")}
+    if "rating" not in columns:
+        connection.execute(text("ALTER TABLE answers ADD COLUMN rating TEXT"))
+
+    if "reaction" in columns:
+        connection.execute(text("UPDATE answers SET rating = reaction WHERE rating IS NULL AND reaction IS NOT NULL"))
 
 
 def _ensure_user_prompt_tracking_columns(connection) -> None:
