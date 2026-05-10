@@ -20,7 +20,12 @@ from telegram.ext import (
 from app.bot import keyboards, messages
 from app.config import get_settings
 from app.database import get_session
-from app.models.question import QUESTION_CATEGORY_ACTION, QUESTION_CATEGORY_CLOSED
+from app.models.question import (
+    BUTTON_QUESTION_CATEGORIES,
+    CHOICE_QUESTION_OPTIONS,
+    QUESTION_CATEGORY_ACTION,
+    QUESTION_CATEGORY_CLOSED,
+)
 from app.services.action_service import ActionService
 from app.services.answer_service import AnswerService
 from app.services.group_service import GroupService
@@ -57,6 +62,7 @@ class pillowtalkBot:
         self.application.add_handler(CommandHandler("reload", self.reload_command))
         self.application.add_handler(CallbackQueryHandler(self.answer_feed_callback, pattern=r"^answers:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.closed_answer_callback, pattern=r"^pick:\d+:\d+$"))
+        self.application.add_handler(CallbackQueryHandler(self.choice_answer_callback, pattern=r"^choice:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.action_done_callback, pattern=r"^actiondone:\d+:\d+$"))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_message))
 
@@ -387,6 +393,14 @@ class pillowtalkBot:
                     delete_source=True,
                 )
                 return
+            if prompt.question.category in CHOICE_QUESTION_OPTIONS:
+                await self._reply_with_menu(
+                    update.message,
+                    update.effective_user.id,
+                    messages.choice_question_text_input_message(),
+                    delete_source=True,
+                )
+                return
             if prompt.question.category == QUESTION_CATEGORY_ACTION:
                 await self._reply_with_menu(
                     update.message,
@@ -478,6 +492,63 @@ class pillowtalkBot:
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
         if created:
+            await self._refresh_group_answer_status_messages(
+                prompt.id,
+                user.group_id,
+                exclude_answer_id=answer.id,
+            )
+
+    async def choice_answer_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.callback_query is None:
+            return
+
+        _, prompt_session_id_text, option_index_text = update.callback_query.data.split(":")
+        prompt_session_id = int(prompt_session_id_text)
+        option_index = int(option_index_text)
+
+        async with get_session() as session:
+            user_service = UserService(session)
+            question_service = QuestionService(session)
+            answer_service = AnswerService(session)
+
+            user, _ = await user_service.register_user(
+                telegram_id=update.effective_user.id,
+                username=update.effective_user.username,
+                display_name=update.effective_user.full_name,
+            )
+            prompt = await question_service.get_prompt_by_id(prompt_session_id)
+            if prompt is None:
+                await update.callback_query.answer(messages.no_prompt_message(), show_alert=True)
+                return
+
+            options = CHOICE_QUESTION_OPTIONS.get(prompt.question.category)
+            if options is None:
+                await update.callback_query.answer(messages.choice_question_text_input_message(), show_alert=True)
+                return
+            if option_index < 0 or option_index >= len(options):
+                await update.callback_query.answer("that choice expired 💨", show_alert=True)
+                return
+
+            choice_label = options[option_index]
+            answer, created = await answer_service.save_answer(user, prompt, choice_label)
+            user = await user_service.update_streak(user, date.today())
+            answer_count = None
+            if user.group_id is not None:
+                answer_count = await answer_service.count_group_answers(prompt.id, user.group_id)
+
+        await update.callback_query.answer("✓ saved")
+        await update.callback_query.edit_message_text(
+            messages.choice_answer_saved_message(
+                choice_label=choice_label,
+                streak=user.streak,
+                answer_count=answer_count,
+                updated=not created,
+            ),
+            reply_markup=keyboards.answer_saved_keyboard(prompt.id),
+        )
+        if update.callback_query.message is not None:
+            await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
+        if created and user.group_id is not None:
             await self._refresh_group_answer_status_messages(
                 prompt.id,
                 user.group_id,
@@ -584,13 +655,13 @@ class pillowtalkBot:
         answer_lines: list[str] = []
         for answer in page_answers:
             is_current_user = answer.user is not None and answer.user.id == user.id
-            if prompt.question.category == QUESTION_CATEGORY_CLOSED:
+            if prompt.question.category in BUTTON_QUESTION_CATEGORIES:
                 answer_lines.append(messages.closed_answer_feed_entry(answer.text, is_current_user=is_current_user))
             else:
                 answer_lines.append(messages.answer_feed_entry(answer.text, is_current_user=is_current_user))
 
         distribution_rows = None
-        if prompt.question.category == QUESTION_CATEGORY_CLOSED:
+        if prompt.question.category in BUTTON_QUESTION_CATEGORIES:
             distribution: dict[str, int] = {}
             for answer in all_answers:
                 distribution[answer.text] = distribution.get(answer.text, 0) + 1
@@ -621,39 +692,44 @@ class pillowtalkBot:
 
     async def _build_prompt_delivery(self, prompt_session, telegram_id: int) -> tuple[str, object | None]:
         category = prompt_session.question.category
-        if category != QUESTION_CATEGORY_CLOSED:
-            text = messages.daily_question_message(prompt_session.question.text, category)
-            return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
+        if category == QUESTION_CATEGORY_CLOSED:
+            async with get_session() as session:
+                user = await UserService(session).get_by_telegram_id(telegram_id)
+                if user is None or user.group_id is None:
+                    text = (
+                        messages.daily_question_message(prompt_session.question.text, category)
+                        + "\n\n"
+                        + messages.closed_question_group_required_message()
+                    )
+                    return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
 
-        async with get_session() as session:
-            user = await UserService(session).get_by_telegram_id(telegram_id)
-            if user is None or user.group_id is None:
+                members = await GroupService(session).list_group_members(user.group_id)
+
+            if not members:
                 text = (
                     messages.daily_question_message(prompt_session.question.text, category)
                     + "\n\n"
-                    + messages.closed_question_group_required_message()
+                    + messages.closed_question_no_members_message()
                 )
                 return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
 
-            members = await GroupService(session).list_group_members(user.group_id)
+            member_buttons = [
+                (
+                    member.id,
+                    messages.closed_question_member_label(member.nickname, member.display_name, member.username, member.telegram_id),
+                )
+                for member in members
+            ]
+            text = messages.daily_question_message(prompt_session.question.text, category)
+            return text, keyboards.closed_question_keyboard(prompt_session.id, member_buttons)
 
-        if not members:
-            text = (
-                messages.daily_question_message(prompt_session.question.text, category)
-                + "\n\n"
-                + messages.closed_question_no_members_message()
-            )
-            return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
+        choice_options = CHOICE_QUESTION_OPTIONS.get(category)
+        if choice_options is not None:
+            text = messages.daily_question_message(prompt_session.question.text, category)
+            return text, keyboards.choice_question_keyboard(prompt_session.id, choice_options, columns=3)
 
-        member_buttons = [
-            (
-                member.id,
-                messages.closed_question_member_label(member.nickname, member.display_name, member.username, member.telegram_id),
-            )
-            for member in members
-        ]
         text = messages.daily_question_message(prompt_session.question.text, category)
-        return text, keyboards.closed_question_keyboard(prompt_session.id, member_buttons)
+        return text, keyboards.prompt_actions_keyboard(prompt_session.id, can_answer_with_buttons=False)
 
     async def _build_action_delivery(self, prompt_session, user) -> tuple[str, object | None]:
         async with get_session() as session:
@@ -919,6 +995,13 @@ class pillowtalkBot:
             if prompt.question.category == QUESTION_CATEGORY_CLOSED:
                 message_text = messages.closed_answer_saved_message(
                     chosen_name=answer.text,
+                    streak=answer.user.streak,
+                    answer_count=answer_count,
+                    updated=answer.updated_at > answer.created_at,
+                )
+            elif prompt.question.category in CHOICE_QUESTION_OPTIONS:
+                message_text = messages.choice_answer_saved_message(
+                    choice_label=answer.text,
                     streak=answer.user.streak,
                     answer_count=answer_count,
                     updated=answer.updated_at > answer.created_at,

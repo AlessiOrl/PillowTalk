@@ -5,6 +5,20 @@ def prompt_actions_keyboard(prompt_session_id: int, can_answer_with_buttons: boo
     return None
 
 
+def choice_question_keyboard(prompt_session_id: int, options: list[str], *, columns: int = 2) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for option_index, label in enumerate(options):
+        row.append(InlineKeyboardButton(label, callback_data=f"choice:{prompt_session_id}:{option_index}"))
+        if len(row) == columns:
+            rows.append(row)
+            row = []
+
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
 def closed_question_keyboard(prompt_session_id: int, members: list[tuple[int, str]]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []

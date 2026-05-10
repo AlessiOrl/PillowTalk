@@ -4,7 +4,7 @@ from html import escape
 from math import floor
 from random import choice as pick
 
-from app.models.question import QUESTION_CATEGORY_ACTION, QUESTION_CATEGORY_CLOSED
+from app.models.question import QUESTION_CATEGORY_ACTION, QUESTION_CATEGORY_CLOSED, QUESTION_CATEGORY_WOULD
 
 
 # ── branding ────────────────────────────────────────────────────
@@ -74,6 +74,8 @@ def returning_user_message() -> str:
 def daily_question_message(question_text: str, category: str | None) -> str:
     if category == QUESTION_CATEGORY_CLOSED:
         footer = "Tap the name that fits most 👇"
+    elif category == QUESTION_CATEGORY_WOULD:
+        footer = "Pick if you'd actually do it 👇"
     elif category == QUESTION_CATEGORY_ACTION:
         footer = "Check your DM — you got a personal action 🎯"
     else:
@@ -109,6 +111,18 @@ def closed_answer_saved_message(chosen_name: str, streak: int, answer_count: int
     return (
         f"{header}\n\n"
         f"→ <b>{escape(chosen_name)}</b>\n\n"
+        f"{_streak_display(streak)}\n"
+        f"{social}"
+    )
+
+
+def choice_answer_saved_message(choice_label: str, streak: int, answer_count: int | None, updated: bool) -> str:
+    header = "Choice updated 🔄" if updated else "Choice locked in 💫"
+    others = max((answer_count or 0) - 1, 0)
+    social = f"You + <b>{others}</b> others answered tonight" if others else "You're the first one tonight 👀"
+    return (
+        f"{header}\n\n"
+        f"→ <b>{escape(choice_label)}</b>\n\n"
         f"{_streak_display(streak)}\n"
         f"{social}"
     )
@@ -166,6 +180,10 @@ def closed_question_no_members_message() -> str:
 
 def closed_question_text_input_message() -> str:
     return "This one is pick-only 👆\nUse the buttons under the question."
+
+
+def choice_question_text_input_message() -> str:
+    return "This one is choice-only 👆\nUse the buttons under the question."
 
 
 def action_not_implemented_message() -> str:
@@ -237,7 +255,7 @@ def read_answers_message(
         f"<b>{escape(question_text)}</b>",
     ]
 
-    if category == QUESTION_CATEGORY_CLOSED and distribution_rows:
+    if category in {QUESTION_CATEGORY_CLOSED, QUESTION_CATEGORY_WOULD} and distribution_rows:
         lines.append("")
         for label, count, total_answers in distribution_rows:
             pct = round((count / total_answers) * 100) if total_answers > 0 else 0

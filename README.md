@@ -20,7 +20,7 @@ Users only read anonymous answers from their own group.
 
 - Daily question broadcast at a configurable hour
 - CSV question import on startup
-- Strict question categories: `open`, `closed`, `action`
+- Strict question categories: `open`, `closed`, `would`, `action`
 - Private answers saved per daily prompt session
 - One group per user
 - Admin-created groups with invite codes
@@ -125,5 +125,6 @@ Before first run:
 - `/read` hides the user’s own answer and only shows anonymous answers from the same group
 - `open` questions accept free-text replies
 - `closed` questions are answered by tapping a person from the user's current group
+- `would` questions are answered by tapping one of three fixed options: `🟢 would do`, `🟠 maybe`, `🔴 never`
 - `action` questions are reserved but not implemented yet
 - If the Telegram token is missing, the API still starts but bot polling is skipped
