@@ -13,12 +13,12 @@ SEP = "─   ─   ─   ─   ─  "
 SEP_LIGHT = "  "
 
 # ── micro-copy pools ───────────────────────────────────────────
-_SAVED_REACTIONS = ["noted. 🤫", "locked in. 💫", "heard you. ✨", "saved. 🫧"]
+_SAVED_REACTIONS = ["Noted. 🤫", "Locked in. 💫", "Heard you. ✨", "Saved. 🫧"]
 _STREAK_HYPE = [
-    "you're on fire rn 🔥",
-    "don't break the chain ✨",
-    "streak is alive 🔥",
-    "keep going, it's glowing 🌙",
+    "You're on fire rn 🔥",
+    "Don't break the chain ✨",
+    "Streak is alive 🔥",
+    "Keep going, it's glowing 🌙",
 ]
 
 
@@ -32,7 +32,7 @@ def _rand_streak_hype() -> str:
 
 def _streak_display(streak: int) -> str:
     if streak <= 0:
-        return "🕯 streak reset — answer tonight to start fresh"
+        return "🕯 Streak reset — answer tonight to start fresh"
     flames = "🔥" * min(streak, 5)
     return f"{flames} <b>{streak}</b>-day streak"
 
@@ -41,9 +41,9 @@ def _social_count(answer_count: int | None, has_group: bool) -> str:
     if has_group and answer_count is not None:
         others = max(answer_count - 1, 0)
         if others == 0:
-            return "you're the first one tonight 👀"
-        return f"you + <b>{others}</b> others answered tonight"
-    return "join a group to see what others said"
+            return "You're the first one tonight 👀"
+        return f"You + <b>{others}</b> others answered tonight"
+    return "Join a group to see what others said"
 
 
 def welcome_message(display_name: str | None) -> str:
@@ -51,13 +51,13 @@ def welcome_message(display_name: str | None) -> str:
     return (
         f"{APP_TAG}\n"
         f"{SEP}\n\n"
-        f"hey {name} 🫧\n\n"
-        "one question a day.\n"
-        "one honest answer.\n"
-        "late-night energy only.\n\n"
+        f"Hey {name} 🫧\n\n"
+        "One question a day.\n"
+        "One honest answer.\n"
+        "Late-night energy only.\n\n"
         f"{SEP_LIGHT}\n\n"
-        "when the question drops — just reply here.\n"
-        "no names. no judgement."
+        "When the question drops — just reply here.\n"
+        "No names. No judgement."
     )
 
 
@@ -65,31 +65,31 @@ def returning_user_message() -> str:
     return (
         f"{APP_TAG}\n"
         f"{SEP}\n\n"
-        "welcome back ✨\n\n"
-        "you're already in.\n"
-        "tonight's question will land soon — just answer here."
+        "Welcome back ✨\n\n"
+        "You're already in.\n"
+        "Tonight's question will land soon — just answer here."
     )
 
 
 def daily_question_message(question_text: str, category: str | None) -> str:
     if category == QUESTION_CATEGORY_CLOSED:
-        footer = "tap the name that fits most 👇"
+        footer = "Tap the name that fits most 👇"
     elif category == QUESTION_CATEGORY_ACTION:
-        footer = "check your DM — you got a personal action 🎯"
+        footer = "Check your DM — you got a personal action 🎯"
     else:
-        footer = "reply with whatever comes to mind.\nbe honest. 🤫"
+        footer = "Reply with whatever comes to mind.\nBe honest. 🤫"
 
     return (
-        f"today's question 🌙\n"
-        f"{SEP}\n\n"
-        f"<b>{escape(question_text)}</b>\n\n"
-        f"{SEP_LIGHT}\n"
+        f"Today's question 🌙\n"
+        f"\n"
+        f"<b><tg-spoiler>{escape(question_text)}</tg-spoiler></b>\n\n"
+        f"\n"
         f"{footer}"
     )
 
 
 def answer_saved_message(streak: int, answer_count: int | None, updated: bool, has_group: bool) -> str:
-    header = "answer updated 🔄" if updated else _rand_saved()
+    header = "Answer updated 🔄" if updated else _rand_saved()
     return (
         f"{header}\n\n"
         f"{_streak_display(streak)}\n"
@@ -103,9 +103,9 @@ def open_answer_cleanup_message(seconds_remaining: int) -> str:
 
 
 def closed_answer_saved_message(chosen_name: str, streak: int, answer_count: int | None, updated: bool) -> str:
-    header = "choice updated 🔄" if updated else "choice locked in 💫"
+    header = "Choice updated 🔄" if updated else "Choice locked in 💫"
     others = max((answer_count or 0) - 1, 0)
-    social = f"you + <b>{others}</b> others answered tonight" if others else "you're the first one tonight 👀"
+    social = f"You + <b>{others}</b> others answered tonight" if others else "You're the first one tonight 👀"
     return (
         f"{header}\n\n"
         f"→ <b>{escape(chosen_name)}</b>\n\n"
@@ -115,14 +115,14 @@ def closed_answer_saved_message(chosen_name: str, streak: int, answer_count: int
 
 
 def skip_message() -> str:
-    return "skipped 🕯\nstreak cooled off."
+    return "Skipped 🕯\nStreak cooled off."
 
 
 def streak_message(streak: int) -> str:
     if streak <= 0:
         return (
-            "no streak yet 🕯\n\n"
-            "answer tonight to light it up."
+            "No streak yet 🕯\n\n"
+            "Answer tonight to light it up."
         )
     return (
         f"{_streak_display(streak)}\n"
@@ -132,70 +132,70 @@ def streak_message(streak: int) -> str:
 
 def group_required_message() -> str:
     return (
-        "you need a group first 🫧\n\n"
-        "ask a friend for a code, then:\n"
+        "You need a group first 🫧\n\n"
+        "Ask a friend for a code, then:\n"
         "<code>/join CODE</code>"
     )
 
 
 def no_prompt_message() -> str:
     return (
-        "nothing live yet 🌙\n\n"
-        "the first question drops soon.\nwe'll ping you."
+        "Nothing live yet 🌙\n\n"
+        "The first question drops soon.\nWe'll ping you."
     )
 
 
 def no_group_answers_message() -> str:
     return (
-        "quiet room 🤫\n\n"
-        "no one else in your group answered yet.\n"
-        "you could be the first."
+        "Quiet room 🤫\n\n"
+        "No one else in your group answered yet.\n"
+        "You could be the first."
     )
 
 
 def closed_question_group_required_message() -> str:
     return (
-        "this one needs a group 🫧\n"
-        "join one first — then pick from your people."
+        "This one needs a group 🫧\n"
+        "Join one first — then pick from your people."
     )
 
 
 def closed_question_no_members_message() -> str:
-    return "your group is empty rn — no names to pick yet."
+    return "Your group is empty rn — no names to pick yet."
 
 
 def closed_question_text_input_message() -> str:
-    return "this one is pick-only 👆\nuse the buttons under the question."
+    return "This one is pick-only 👆\nUse the buttons under the question."
 
 
 def action_not_implemented_message() -> str:
-    return "action mode isn't live yet 🛸\njust a teaser for now."
+    return "Action mode isn't live yet 🛸\nJust a teaser for now."
 
 
 def action_prompt_message(action_text: str) -> str:
     return (
-        f"tonight's action 🎯\n"
+        f"Tonight's action 🎯\n"
         f"\n"
-        f"<b>{escape(action_text)}</b>\n\n"
+        f"<b><tg-spoiler>{escape(action_text)}</tg-spoiler></b>\n\n"
         f"\n"
-        "do it and tap ✅ when you're done."
+        "Do it and tap ✅ when you're done."
     )
 
 
 def action_completed_message(action_text: str, streak: int) -> str:
     return (
-        f"done ✅\n\n"
+        f"Done ✅\n\n"
         f"<i>{escape(action_text)}</i>\n\n"
         f"{_streak_display(streak)}"
     )
 
 
 def action_already_completed_message() -> str:
-    return "you already completed this one ✅"
+    return "You already completed this one ✅"
 
 
 def action_no_assignment_message() -> str:
-    return "no action assigned yet 🌙\nwait for the next question drop."
+    return "No action assigned yet 🌙\nWait for the next question drop."
 
 
 def action_feed_entry(action_text: str, user_label: str, *, is_current_user: bool) -> str:
@@ -206,8 +206,8 @@ def action_feed_entry(action_text: str, user_label: str, *, is_current_user: boo
 
 def no_completed_actions_message() -> str:
     return (
-        "no one completed their action yet 🤫\n\n"
-        "be the first — tap ✅ when you're done."
+        "No one completed their action yet 🤫\n\n"
+        "Be the first — tap ✅ when you're done."
     )
 
 
@@ -232,7 +232,7 @@ def read_answers_message(
     distribution_rows: list[tuple[str, int, int]] | None = None,
 ) -> str:
     lines = [
-        "tonight's answers 🌙",
+        "Tonight's answers 🌙",
         "",
         f"<b>{escape(question_text)}</b>",
     ]
@@ -272,16 +272,16 @@ def distribution_bar(count: int, total: int, *, width: int = 14) -> str:
 
 def group_joined_message(group_name: str) -> str:
     return (
-        f"you're in ✨\n\n"
-        f"group: <b>{escape(group_name)}</b>\n"
-        "you'll only see answers from your people now."
+        f"You're in ✨\n\n"
+        f"Group: <b>{escape(group_name)}</b>\n"
+        "You'll only see answers from your people now."
     )
 
 
 def group_left_message() -> str:
     return (
-        "you left the group 🫧\n\n"
-        "no more group answers until you join another one."
+        "You left the group 🫧\n\n"
+        "No more group answers until you join another one."
     )
 
 
@@ -295,10 +295,10 @@ def my_group_message(group_name: str, member_count: int) -> str:
 
 def group_created_message(group_name: str, invite_code: str) -> str:
     return (
-        f"group created ✨\n\n"
+        f"Group created ✨\n\n"
         f"<b>{escape(group_name)}</b>\n"
-        f"invite code: <code>{escape(invite_code)}</code>\n\n"
-        "share it with your people 🫧"
+        f"Invite code: <code>{escape(invite_code)}</code>\n\n"
+        "Share it with your people 🫧"
     )
 
 
@@ -307,7 +307,7 @@ def member_added_message(telegram_id: int, group_name: str) -> str:
 
 
 def invalid_group_code_message() -> str:
-    return "that code doesn't match anything 🤔\ndouble-check and try again."
+    return "That code doesn't match anything 🤔\nDouble-check and try again."
 
 
 def admin_only_message() -> str:
@@ -337,43 +337,43 @@ def usage_message(command: str, example: str) -> str:
 
 def join_group_prompt_message() -> str:
     return (
-        "drop the invite code 🫧\n\n"
+        "Drop the invite code 🫧\n\n"
         "<code>/join CODE</code>"
     )
 
 
 def create_group_prompt_message() -> str:
     return (
-        "give your group a name ✨\n\n"
+        "Give your group a name ✨\n\n"
         "<code>/creategroup name</code>"
     )
 
 
 def add_member_prompt_message() -> str:
     return (
-        "add a member like this:\n\n"
+        "Add a member like this:\n\n"
         "<code>/addmember 123456789 ABCD1234</code>"
     )
 
 
 def nickname_set_message(nickname: str) -> str:
     return (
-        f"you're now <b>{escape(nickname)}</b> in your group \u2728\n"
-        "that's how others will see you."
+        f"You're now <b>{escape(nickname)}</b> in your group \u2728\n"
+        "That's how others will see you."
     )
 
 
 def nickname_cleared_message() -> str:
-    return "nickname cleared \ud83e\udee7\nyour telegram name will be used instead."
+    return "Nickname cleared \ud83e\udee7\nYour telegram name will be used instead."
 
 
 def nickname_prompt_message() -> str:
     return (
-        "pick a name for your group \u2728\n\n"
+        "Pick a name for your group \u2728\n\n"
         "<code>/nickname yourname</code>\n\n"
-        "this is how you'll show up in polls and answers."
+        "This is how you'll show up in polls and answers."
     )
 
 
 def nickname_too_long_message() -> str:
-    return "keep it under 32 characters \ud83d\ude45"
+    return "Keep it under 32 characters \ud83d\ude45"
