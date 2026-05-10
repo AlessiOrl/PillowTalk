@@ -6,6 +6,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import get_settings
+from app.database import get_session
+from app.services.app_settings_service import AppSettingsService
 
 
 class DailyQuestionScheduler:
@@ -14,16 +16,34 @@ class DailyQuestionScheduler:
         self.dispatch_callback = dispatch_callback
         self.scheduler = AsyncIOScheduler(timezone=self.settings.timezone)
         self.started = False
+        self.current_hour = self.settings.daily_question_hour
+        self.current_minute = self.settings.daily_question_minute
 
-    def start(self) -> None:
+    async def start(self) -> None:
         if self.started:
             return
 
+        async with get_session() as session:
+            settings_service = AppSettingsService(session)
+            hour, minute = await settings_service.get_daily_question_time(
+                default_hour=self.settings.daily_question_hour,
+                default_minute=self.settings.daily_question_minute,
+            )
+
+        self.set_daily_time(hour=hour, minute=minute)
+        self.scheduler.start()
+        self.started = True
+
+    def set_daily_time(self, *, hour: int, minute: int) -> None:
+        self.current_hour = hour
+        self.current_minute = minute
+        self.settings.daily_question_hour = hour
+        self.settings.daily_question_minute = minute
         self.scheduler.add_job(
             self.dispatch_callback,
             trigger=CronTrigger(
-                hour=self.settings.daily_question_hour,
-                minute=self.settings.daily_question_minute,
+                hour=hour,
+                minute=minute,
                 timezone=self.settings.timezone,
             ),
             id="daily-question",
@@ -31,8 +51,9 @@ class DailyQuestionScheduler:
             coalesce=True,
             max_instances=1,
         )
-        self.scheduler.start()
-        self.started = True
+
+    def get_daily_time(self) -> tuple[int, int]:
+        return self.current_hour, self.current_minute
 
     async def shutdown(self) -> None:
         if not self.started:

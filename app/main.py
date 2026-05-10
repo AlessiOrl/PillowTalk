@@ -59,11 +59,12 @@ async def lifespan(app: FastAPI):
     scheduler = DailyQuestionScheduler(scheduled_dispatch)
     app.state.bot_service = bot_service
     app.state.scheduler = scheduler
+    bot_service.bind_scheduler(scheduler)
 
     app.state.reimport_questions = _reimport_questions
 
     await bot_service.start()
-    scheduler.start()
+    await scheduler.start()
     try:
         yield
     finally:

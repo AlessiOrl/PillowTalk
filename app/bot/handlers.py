@@ -28,8 +28,10 @@ from app.models.question import (
 )
 from app.services.action_service import ActionService
 from app.services.answer_service import AnswerService
+from app.services.app_settings_service import AppSettingsService
 from app.services.group_service import GroupService
 from app.services.question_service import PromptDispatch, QuestionService
+from app.services.scheduler import DailyQuestionScheduler
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
@@ -40,10 +42,14 @@ class pillowtalkBot:
         self.settings = get_settings()
         self.enabled = bool(self.settings.telegram_bot_token)
         self.application: Application | None = None
+        self.scheduler: DailyQuestionScheduler | None = None
         if self.enabled:
             defaults = Defaults(parse_mode=self.settings.message_parse_mode)
             self.application = Application.builder().token(self.settings.telegram_bot_token).defaults(defaults).build()
             self._register_handlers()
+
+    def bind_scheduler(self, scheduler: DailyQuestionScheduler) -> None:
+        self.scheduler = scheduler
 
     def _register_handlers(self) -> None:
         if self.application is None:
@@ -60,6 +66,7 @@ class pillowtalkBot:
         self.application.add_handler(CommandHandler("nickname", self.nickname_command))
         self.application.add_handler(CommandHandler("next", self.force_next_command))
         self.application.add_handler(CommandHandler("reload", self.reload_command))
+        self.application.add_handler(CommandHandler("questiontime", self.question_time_command))
         self.application.add_handler(CallbackQueryHandler(self.answer_feed_callback, pattern=r"^answers:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.closed_answer_callback, pattern=r"^pick:\d+:\d+$"))
         self.application.add_handler(CallbackQueryHandler(self.choice_answer_callback, pattern=r"^choice:\d+:\d+$"))
@@ -363,6 +370,50 @@ class pillowtalkBot:
             delete_source=True,
         )
 
+    async def question_time_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.message is None:
+            return
+
+        if not await self._is_admin(update.effective_user.id):
+            await self._reply_with_menu(update.message, update.effective_user.id, messages.admin_only_message(), delete_source=True)
+            return
+
+        current_time = self._format_time(self.settings.daily_question_hour, self.settings.daily_question_minute)
+        if not context.args:
+            await self._reply_with_menu(
+                update.message,
+                update.effective_user.id,
+                messages.question_time_usage_message(current_time, self.settings.timezone),
+                delete_source=True,
+            )
+            return
+
+        scheduled_time = self._parse_question_time(context.args[0])
+        if scheduled_time is None:
+            await self._reply_with_menu(
+                update.message,
+                update.effective_user.id,
+                messages.question_time_invalid_message(),
+                delete_source=True,
+            )
+            return
+
+        hour, minute = scheduled_time
+        async with get_session() as session:
+            await AppSettingsService(session).set_daily_question_time(hour=hour, minute=minute)
+
+        self.settings.daily_question_hour = hour
+        self.settings.daily_question_minute = minute
+        if self.scheduler is not None:
+            self.scheduler.set_daily_time(hour=hour, minute=minute)
+
+        await self._reply_with_menu(
+            update.message,
+            update.effective_user.id,
+            messages.question_time_set_message(self._format_time(hour, minute), self.settings.timezone),
+            delete_source=True,
+        )
+
     async def text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.message is None or not update.message.text:
             return
@@ -645,20 +696,18 @@ class pillowtalkBot:
             await responder(messages.no_group_answers_message())
             return
 
-        page_answers = all_answers[offset : offset + self.settings.answer_feed_page_size]
-        if not page_answers:
-            page_answers = all_answers[: self.settings.answer_feed_page_size]
-            offset = 0
-
-        page_start = offset + 1
-        page_end = offset + len(page_answers)
         answer_lines: list[str] = []
-        for answer in page_answers:
-            is_current_user = answer.user is not None and answer.user.id == user.id
+        for answer in all_answers:
+            user_label = messages.closed_question_member_label(
+                answer.user.nickname if answer.user else None,
+                answer.user.display_name if answer.user else None,
+                answer.user.username if answer.user else None,
+                answer.user.telegram_id if answer.user else 0,
+            )
             if prompt.question.category in BUTTON_QUESTION_CATEGORIES:
-                answer_lines.append(messages.closed_answer_feed_entry(answer.text, is_current_user=is_current_user))
+                answer_lines.append(messages.closed_answer_feed_entry(user_label, answer.text))
             else:
-                answer_lines.append(messages.answer_feed_entry(answer.text, is_current_user=is_current_user))
+                answer_lines.append(messages.answer_feed_entry(user_label, answer.text))
 
         distribution_rows = None
         if prompt.question.category in BUTTON_QUESTION_CATEGORIES:
@@ -671,23 +720,13 @@ class pillowtalkBot:
                 for label, count in distribution_rows
             ]
 
-        keyboard = keyboards.answer_pagination_keyboard(
-            prompt.id,
-            offset=offset,
-            page_size=self.settings.answer_feed_page_size,
-            total=total,
-        )
         await responder(
             messages.read_answers_message(
                 prompt.question.text,
                 prompt.question.category,
                 answer_lines,
-                page_start=page_start,
-                page_end=page_end,
-                total=total,
                 distribution_rows=distribution_rows,
             ),
-            reply_markup=keyboard,
         )
 
     async def _build_prompt_delivery(self, prompt_session, telegram_id: int) -> tuple[str, object | None]:
@@ -759,40 +798,22 @@ class pillowtalkBot:
             await responder(messages.no_completed_actions_message())
             return
 
-        page_actions = completed_actions[offset : offset + self.settings.answer_feed_page_size]
-        if not page_actions:
-            page_actions = completed_actions[: self.settings.answer_feed_page_size]
-            offset = 0
-
         answer_lines: list[str] = []
-        for action in page_actions:
-            is_current_user = action.user is not None and action.user.id == user.id
+        for action in completed_actions:
             user_label = messages.closed_question_member_label(
                 action.user.nickname if action.user else None,
                 action.user.display_name if action.user else None,
                 action.user.username if action.user else None,
                 action.user.telegram_id if action.user else 0,
             )
-            answer_lines.append(messages.action_feed_entry(action.question.text, user_label, is_current_user=is_current_user))
+            answer_lines.append(messages.action_feed_entry(action.question.text, user_label, is_current_user=False))
 
-        page_start = offset + 1
-        page_end = offset + len(page_actions)
-        keyboard = keyboards.answer_pagination_keyboard(
-            prompt.id,
-            offset=offset,
-            page_size=self.settings.answer_feed_page_size,
-            total=total,
-        )
         await responder(
             messages.read_answers_message(
                 prompt.question.text,
                 prompt.question.category,
                 answer_lines,
-                page_start=page_start,
-                page_end=page_end,
-                total=total,
             ),
-            reply_markup=keyboard,
         )
 
     async def _is_admin(self, telegram_id: int) -> bool:
@@ -800,6 +821,33 @@ class pillowtalkBot:
 
     def _should_suppress_admin_confirmation(self, telegram_id: int) -> bool:
         return self.settings.admin_telegram_id is not None and telegram_id == self.settings.admin_telegram_id
+
+    @staticmethod
+    def _parse_question_time(raw_value: str) -> tuple[int, int] | None:
+        time_text = raw_value.strip()
+        if not time_text:
+            return None
+
+        if ":" not in time_text:
+            try:
+                hour = int(time_text)
+            except ValueError:
+                return None
+            return (hour, 0) if 0 <= hour <= 23 else None
+
+        hour_text, minute_text = time_text.split(":", maxsplit=1)
+        try:
+            hour = int(hour_text)
+            minute = int(minute_text)
+        except ValueError:
+            return None
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        return hour, minute
+
+    @staticmethod
+    def _format_time(hour: int, minute: int) -> str:
+        return f"{hour:02d}:{minute:02d}"
 
     async def _run_open_answer_cleanup(self, *, user, prompt_session_id: int, answer_message, countdown_message) -> None:
         for seconds_remaining in range(4, 0, -1):

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     question_cooldown_days: int = Field(default=30, alias="QUESTION_COOLDOWN_DAYS")
     answer_feed_page_size: int = Field(default=1, alias="ANSWER_FEED_PAGE_SIZE")
 
-    daily_question_hour: int = Field(default=21, alias="DAILY_QUESTION_HOUR")
+    daily_question_hour: int = Field(default=22, alias="DAILY_QUESTION_HOUR")
     daily_question_minute: int = Field(default=0, alias="DAILY_QUESTION_MINUTE")
     timezone: str = Field(default="Europe/Rome", alias="TIMEZONE")
 

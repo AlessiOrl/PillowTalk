@@ -18,7 +18,7 @@ Users only read anonymous answers from their own group.
 
 ## Features
 
-- Daily question broadcast at a configurable hour
+- Daily question broadcast at a configurable time
 - CSV question import on startup
 - Strict question categories: `open`, `closed`, `would`, `action`
 - Private answers saved per daily prompt session
@@ -65,7 +65,7 @@ Copy `.env.example` to `.env` and adjust values.
 - `QUESTIONS_CSV_PATH`: CSV seed file path
 - `QUESTION_COOLDOWN_DAYS`: how long to avoid repeating questions
 - `ANSWER_FEED_PAGE_SIZE`: number of group answers shown per page
-- `DAILY_QUESTION_HOUR`: hour for the scheduled daily question
+- `DAILY_QUESTION_HOUR`: hour for the scheduled daily question, defaults to `22`
 - `DAILY_QUESTION_MINUTE`: minute for the scheduled daily question
 - `TIMEZONE`: scheduler timezone
 - `LOG_LEVEL`: log verbosity
@@ -102,6 +102,7 @@ curl -X POST -H "Authorization: Bearer change-me-now" http://localhost:8000/api/
 - `/leavegroup`
 - `/creategroup <name>` admin only
 - `/addmember <telegram_id> <group_code>` admin only
+- `/questiontime <HH[:MM]>` admin only
 - `/forcenext` admin only
 
 ## Docker compose
@@ -122,7 +123,7 @@ Before first run:
 - Questions are imported on every startup and updated by CSV `id`
 - Answers are stored per prompt session, so the same question can return later
 - Not answering is treated as a skip; there is no manual skip action
-- `/read` hides the user’s own answer and only shows anonymous answers from the same group
+- `/read` shows all answers from the same group with member names
 - `open` questions accept free-text replies
 - `closed` questions are answered by tapping a person from the user's current group
 - `would` questions are answered by tapping one of three fixed options: `🟢 would do`, `🟠 maybe`, `🔴 never`

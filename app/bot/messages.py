@@ -244,9 +244,6 @@ def read_answers_message(
     category: str | None,
     answer_lines: list[str],
     *,
-    page_start: int,
-    page_end: int,
-    total: int,
     distribution_rows: list[tuple[str, int, int]] | None = None,
 ) -> str:
     lines = [
@@ -255,30 +252,27 @@ def read_answers_message(
         f"<b>{escape(question_text)}</b>",
     ]
 
+    lines.extend(["", *answer_lines])
+
     if category in {QUESTION_CATEGORY_CLOSED, QUESTION_CATEGORY_WOULD} and distribution_rows:
+        lines.append("")
+        lines.append("Summary")
         lines.append("")
         for label, count, total_answers in distribution_rows:
             pct = round((count / total_answers) * 100) if total_answers > 0 else 0
             lines.append(f"  {escape(label)}")
             lines.append(f"  {distribution_bar(count, total_answers)}  <b>{pct}%</b>  ({count})")
             lines.append("")
-    else:
-        lines.extend([""])
-        lines.extend(answer_lines)
 
     return "\n".join(lines)
 
 
-def answer_feed_entry(answer_text: str, *, is_current_user: bool) -> str:
-    if is_current_user:
-        return f"🫵 <b>you</b> said:\n<i>{escape(answer_text)}</i>"
-    return f"💬 someone said:\n<i>{escape(answer_text)}</i>"
+def answer_feed_entry(user_label: str, answer_text: str) -> str:
+    return f"💬 <b>{escape(user_label)}</b> said:\n<i>{escape(answer_text)}</i>"
 
 
-def closed_answer_feed_entry(answer_text: str, *, is_current_user: bool) -> str:
-    if is_current_user:
-        return f"🫵 <b>you</b> picked: <b>{escape(answer_text)}</b>"
-    return f"💬 someone picked: <b>{escape(answer_text)}</b>"
+def closed_answer_feed_entry(user_label: str, answer_text: str) -> str:
+    return f"💬 <b>{escape(user_label)}</b> picked: <b>{escape(answer_text)}</b>"
 
 
 def distribution_bar(count: int, total: int, *, width: int = 14) -> str:
@@ -337,6 +331,23 @@ def force_next_done_message(question_text: str) -> str:
         f"✓ new question sent\n\n"
         f"<b>{escape(question_text)}</b>"
     )
+
+
+def question_time_usage_message(current_time: str, timezone: str) -> str:
+    return (
+        f"Current daily question time: <b>{escape(current_time)}</b> ({escape(timezone)})\n\n"
+        "Set it in 24h format:\n"
+        "<code>/questiontime 22</code>\n"
+        "<code>/questiontime 22:30</code>"
+    )
+
+
+def question_time_invalid_message() -> str:
+    return "Use a valid 24h time like <code>/questiontime 22</code> or <code>/questiontime 22:30</code>."
+
+
+def question_time_set_message(time_text: str, timezone: str) -> str:
+    return f"✓ daily question time set to <b>{escape(time_text)}</b> ({escape(timezone)})."
 
 
 def closed_question_member_label(nickname: str | None, display_name: str | None, username: str | None, telegram_id: int) -> str:
