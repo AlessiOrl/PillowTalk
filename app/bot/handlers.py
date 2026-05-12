@@ -44,6 +44,7 @@ class pillowtalkBot:
         self.enabled = bool(self.settings.telegram_bot_token)
         self.application: Application | None = None
         self.scheduler: DailyQuestionScheduler | None = None
+        self.open_answer_feed_messages: dict[int, tuple[int, int]] = {}
         if self.enabled:
             defaults = Defaults(parse_mode=self.settings.message_parse_mode)
             self.application = Application.builder().token(self.settings.telegram_bot_token).defaults(defaults).build()
@@ -498,18 +499,20 @@ class pillowtalkBot:
 
         countdown_message = await update.message.reply_text(messages.open_answer_cleanup_message(5))
         await self._set_answer_status_message_id(answer.id, None)
+        if user.group_id is not None:
+            await self._refresh_group_answer_feed_messages(prompt.id, user.group_id)
+            if created:
+                await self._refresh_group_answer_status_messages(
+                    prompt.id,
+                    user.group_id,
+                    exclude_answer_id=answer.id,
+                )
         await self._run_open_answer_cleanup(
             user=user,
             prompt_session_id=prompt.id,
             answer_message=update.message,
             countdown_message=countdown_message,
         )
-        if created and user.group_id is not None:
-            await self._refresh_group_answer_status_messages(
-                prompt.id,
-                user.group_id,
-                exclude_answer_id=answer.id,
-            )
 
     async def closed_answer_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.callback_query is None:
@@ -571,6 +574,7 @@ class pillowtalkBot:
         )
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
+        await self._refresh_group_answer_feed_messages(prompt.id, user.group_id)
         if created:
             await self._refresh_group_answer_status_messages(
                 prompt.id,
@@ -628,6 +632,8 @@ class pillowtalkBot:
         )
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
+        if user.group_id is not None:
+            await self._refresh_group_answer_feed_messages(prompt.id, user.group_id)
         if created and user.group_id is not None:
             await self._refresh_group_answer_status_messages(
                 prompt.id,
@@ -680,6 +686,8 @@ class pillowtalkBot:
         )
         if update.callback_query.message is not None:
             await self._set_answer_status_message_id(answer.id, update.callback_query.message.message_id)
+        if user.group_id is not None:
+            await self._refresh_group_answer_feed_messages(prompt_session_id, user.group_id)
         if user.group_id is not None:
             await self._refresh_group_answer_status_messages(
                 prompt_session_id,
@@ -747,6 +755,7 @@ class pillowtalkBot:
             user = await user_service.get_by_telegram_id(telegram_id)
             if user is None or user.group_id is None:
                 await responder(messages.group_required_message())
+                self._clear_open_answer_feed_message(telegram_id)
                 return
 
             prompt = await (
@@ -756,6 +765,7 @@ class pillowtalkBot:
             )
             if prompt is None:
                 await responder(messages.no_prompt_message())
+                self._clear_open_answer_feed_message(telegram_id)
                 return
 
             user_answer = await answer_service.get_user_answer(user.id, prompt.id)
@@ -780,7 +790,8 @@ class pillowtalkBot:
 
         total = len(all_answers)
         if total == 0:
-            await responder(messages.no_group_answers_message(), reply_markup=feed_keyboard)
+            response = await responder(messages.no_group_answers_message(), reply_markup=feed_keyboard)
+            self._remember_open_answer_feed_message(telegram_id, prompt.id, response)
             return
 
         answer_lines: list[str] = []
@@ -796,7 +807,7 @@ class pillowtalkBot:
             else:
                 answer_lines.append(messages.answer_feed_entry(user_label, answer.text))
 
-        await responder(
+        response = await responder(
             messages.read_answers_message(
                 prompt.question.text,
                 prompt.question.category,
@@ -804,6 +815,7 @@ class pillowtalkBot:
             ),
             reply_markup=feed_keyboard,
         )
+        self._remember_open_answer_feed_message(telegram_id, prompt.id, response)
 
     async def _build_prompt_delivery(self, prompt_session, telegram_id: int) -> tuple[str, object | None]:
         category = prompt_session.question.category
@@ -1103,6 +1115,47 @@ class pillowtalkBot:
         async with get_session() as session:
             await AnswerService(session).set_status_message_id(answer_id, message_id)
 
+    def _remember_open_answer_feed_message(self, telegram_id: int, prompt_session_id: int, response) -> None:
+        message_id = getattr(response, "message_id", None)
+        if message_id is None:
+            return
+        self.open_answer_feed_messages[telegram_id] = (prompt_session_id, message_id)
+
+    def _clear_open_answer_feed_message(self, telegram_id: int, *, prompt_session_id: int | None = None) -> None:
+        tracked_feed = self.open_answer_feed_messages.get(telegram_id)
+        if tracked_feed is None:
+            return
+        if prompt_session_id is not None and tracked_feed[0] != prompt_session_id:
+            return
+        self.open_answer_feed_messages.pop(telegram_id, None)
+
+    async def _refresh_group_answer_feed_messages(self, prompt_session_id: int, group_id: int) -> None:
+        if self.application is None or not self.open_answer_feed_messages:
+            return
+
+        tracked_feeds = dict(self.open_answer_feed_messages)
+        async with get_session() as session:
+            members = await GroupService(session).list_group_members(group_id)
+
+        for member in members:
+            tracked_feed = tracked_feeds.get(member.telegram_id)
+            if tracked_feed is None or tracked_feed[0] != prompt_session_id:
+                continue
+
+            async def edit_feed_message(text: str, reply_markup=None, *, telegram_id: int = member.telegram_id, message_id: int = tracked_feed[1]):
+                return await self.application.bot.edit_message_text(
+                    chat_id=telegram_id,
+                    message_id=message_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                )
+
+            try:
+                await self._send_answers_page(member.telegram_id, edit_feed_message, prompt_session_id=prompt_session_id)
+            except TelegramError as exc:
+                self._clear_open_answer_feed_message(member.telegram_id, prompt_session_id=prompt_session_id)
+                logger.debug("Failed to refresh answer feed for %s: %s", member.telegram_id, exc)
+
     async def _refresh_group_answer_status_messages(
         self,
         prompt_session_id: int,
@@ -1126,6 +1179,9 @@ class pillowtalkBot:
             if answer.id == exclude_answer_id or answer.status_message_id is None:
                 continue
             if answer.user is None:
+                continue
+            tracked_feed = self.open_answer_feed_messages.get(answer.user.telegram_id)
+            if tracked_feed is not None and tracked_feed == (prompt_session_id, answer.status_message_id):
                 continue
 
             if prompt.question.category == QUESTION_CATEGORY_CLOSED:
