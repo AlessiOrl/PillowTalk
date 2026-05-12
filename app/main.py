@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
 
     async def scheduled_dispatch() -> None:
         await _reimport_questions()
-        await bot_service.dispatch_next_prompt(force_new=False, source="scheduled")
+        await bot_service.dispatch_next_prompt(force_new=True, source="scheduled")
 
     scheduler = DailyQuestionScheduler(scheduled_dispatch)
     app.state.bot_service = bot_service

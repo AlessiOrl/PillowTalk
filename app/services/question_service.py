@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -60,7 +61,7 @@ class QuestionService:
         source: str = "scheduled",
         force_new: bool = False,
     ) -> PromptDispatch:
-        prompt_date = asked_on or date.today()
+        prompt_date = asked_on or datetime.now(ZoneInfo(self.settings.timezone)).date()
         if not force_new:
             existing = await self.get_latest_prompt_for_date(prompt_date)
             if existing is not None:
