@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+from io import StringIO
 import logging
 from datetime import date
 
-from telegram import InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, InputFile, Update
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -69,6 +71,7 @@ class pillowtalkBot:
         self.application.add_handler(CommandHandler("nickname", self.nickname_command))
         self.application.add_handler(CommandHandler("next", self.force_next_command))
         self.application.add_handler(CommandHandler("reload", self.reload_command))
+        self.application.add_handler(CommandHandler("ratingscsv", self.export_ratings_command))
         self.application.add_handler(CommandHandler("questiontime", self.question_time_command))
         self.application.add_handler(CallbackQueryHandler(self.help_admin_callback, pattern=r"^helpadmin$"))
         self.application.add_handler(CallbackQueryHandler(self.answer_feed_callback, pattern=r"^answers:\d+:\d+$"))
@@ -399,6 +402,76 @@ class pillowtalkBot:
             f"✓ reloaded <b>{count}</b> questions from CSV.",
             delete_source=True,
         )
+
+    async def export_ratings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user is None or update.message is None:
+            return
+
+        if not await self._is_admin(update.effective_user.id):
+            await self._reply_with_menu(update.message, update.effective_user.id, messages.admin_only_message(), delete_source=True)
+            return
+
+        async with get_session() as session:
+            rated_answers = await AnswerService(session).list_rated_answers()
+
+        if not rated_answers:
+            await self._reply_with_menu(
+                update.message,
+                update.effective_user.id,
+                "No rated answers yet.",
+                delete_source=True,
+            )
+            return
+
+        csv_buffer = StringIO()
+        writer = csv.DictWriter(
+            csv_buffer,
+            fieldnames=[
+                "answer_id",
+                "prompt_session_id",
+                "question_id",
+                "question",
+                "asked_on",
+                "user_id",
+                "telegram_id",
+                "username",
+                "display_name",
+                "nickname",
+                "answer",
+                "rating",
+                "answered_at",
+            ],
+        )
+        writer.writeheader()
+        for answer in rated_answers:
+            prompt_session = answer.prompt_session
+            user = answer.user
+            writer.writerow(
+                {
+                    "answer_id": answer.id,
+                    "prompt_session_id": answer.prompt_session_id,
+                    "question_id": answer.question_id,
+                    "question": prompt_session.question.text if prompt_session and prompt_session.question else "",
+                    "asked_on": prompt_session.asked_on.isoformat() if prompt_session else "",
+                    "user_id": answer.user_id,
+                    "telegram_id": user.telegram_id if user else "",
+                    "username": user.username if user else "",
+                    "display_name": user.display_name if user else "",
+                    "nickname": user.nickname if user else "",
+                    "answer": answer.text,
+                    "rating": answer.rating or "",
+                    "answered_at": answer.created_at.isoformat(),
+                }
+            )
+
+        filename = f"question-ratings-{date.today().isoformat()}.csv"
+        payload = csv_buffer.getvalue().encode("utf-8-sig")
+
+        await update.message.reply_document(
+            document=InputFile(payload, filename=filename),
+            caption=f"Exported <b>{len(rated_answers)}</b> rated answers.",
+        )
+        await self._delete_user_message(update.message)
 
     async def question_time_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.message is None:

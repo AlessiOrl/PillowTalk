@@ -104,6 +104,7 @@ curl -X POST -H "Authorization: Bearer change-me-now" http://localhost:8000/api/
 - `/addmember <telegram_id> <group_code>` admin only
 - `/questiontime <HH[:MM]>` admin only
 - `/forcenext` admin only
+- `/ratingscsv` admin only
 
 ## Docker compose
 

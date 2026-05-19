@@ -106,6 +106,7 @@ def help_admin_message() -> str:
         "<b>Admin commands</b>\n\n"
         "<code>/next</code> send the next question now\n"
         "<code>/reload</code> reload questions from CSV\n"
+        "<code>/ratingscsv</code> export rated answers as CSV\n"
         "<code>/questiontime HH</code> set drop time\n"
         "<code>/questiontime HH:MM</code> set drop time with minutes\n"
         "<code>/addmember ID</code> add a user to your group"

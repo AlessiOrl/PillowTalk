@@ -115,3 +115,17 @@ class AnswerService:
         )
         result = await self.session.scalars(statement)
         return list(result.all())
+
+    async def list_rated_answers(self) -> list[Answer]:
+        statement = (
+            select(Answer)
+            .options(
+                selectinload(Answer.user),
+                selectinload(Answer.prompt_session).selectinload(PromptSession.question),
+            )
+            .join(PromptSession, PromptSession.id == Answer.prompt_session_id)
+            .where(Answer.rating.is_not(None))
+            .order_by(PromptSession.asked_on.asc(), Answer.created_at.asc(), Answer.id.asc())
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
